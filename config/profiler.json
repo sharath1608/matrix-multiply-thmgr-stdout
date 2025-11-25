@@ -8,7 +8,7 @@
   "binaries": [
     "main_original",
     "main",
-    "../../../scripts/curve-fit/fit.py"
+    "/usr/bin/fit.py"
   ],
   "result_collection": {
     "temp_dir_pattern": "/tmp/profiler_{job_id}",
