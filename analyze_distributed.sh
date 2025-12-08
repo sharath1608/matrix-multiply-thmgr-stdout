@@ -303,7 +303,7 @@ echo "thmgr_progress: $PARALLEL_THMGR_PROGRESS"
 echo "direct_progress: $PARALLEL_DIRECT_PROGRESS"
 
 echo "Measuring time taken for distributed execution..."
-start_time=$SECONDS
+st=$SECONDS
 
 python3 distributed_profiler.py \
   --mode measurement \
@@ -337,7 +337,7 @@ python3 distributed_profiler.py \
     exit 1
   }
 
-elapsed_seconds=$(( SECONDS - start_time ))
+elapsed_seconds=$(( SECONDS - st ))
 echo "Elapsed time: $elapsed_seconds seconds"
 
 echo "Distributed measurement phase completed"
