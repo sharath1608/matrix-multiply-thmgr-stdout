@@ -167,7 +167,8 @@ class DistributedProfiler:
         self.job_id = self._resolve_job_id(args.job_id)
         self.repo_path = Path(args.repo_path).resolve()
         self.repo_name = args.repo_name
-        self.analysis_file = Path(args.analysis_file)
+        self.analysis_file = self._resolve_analysis_file_path(args.analysis_file)
+
         self.start_time = args.start_time
         self.repo = args.repo
         self.start_progress = float(args.start_progress)
@@ -230,6 +231,13 @@ class DistributedProfiler:
             work_dir=entry.get("work_dir", "/tmp"),
         )
 
+    def _resolve_analysis_file_path(self, analysis_file: str) -> Path:
+        """Resolve analysis file to absolute path in repo directory."""
+        path = Path(analysis_file)
+        if path.is_absolute():
+            return path
+        return (self.repo_path / path).resolve()
+        
     def _stage_required_files(self) -> None:
         logging.info("Staging workspace at %s", self.job_dir)
         copy_if_needed(self.worker_source, self.worker_dest)
