@@ -174,7 +174,7 @@ do
 done
 
 # generate compile_commands.json
-repo_path="/home/skoday/talp/data/repo/$repo_name"
+repo_path="/data/repo-import/$repo_name"
 
 json_output=$(jq -n \
   --arg dir "$repo_path" \
@@ -235,7 +235,7 @@ PARALLEL_DIRECT_PROGRESS=20
 CURVE_FIT_PROGRESS=25
 ANALYTICS_GENERATION_PROGRESS=10
 
-repo_path="/home/skoday/talp/data/repo/$repo_name"
+repo_path="/app/data/repo-import/$repo_name"
 delay=0  # No delay needed with per-request socket implementation
 
 cluster_config_path="config/cluster.json"
