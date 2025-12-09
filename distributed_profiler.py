@@ -415,8 +415,8 @@ class DistributedProfiler:
 
         await self._update_progress(
             status="In progress",
-            current_step="Serial Measurements (Distributed)",
-            next_step="Parallel Time Optimized Measurements",
+            current_step="Serial Measurements",
+            next_step="Parallel Time Measurements",
             percent=self._current_progress,
         )
 
@@ -424,21 +424,21 @@ class DistributedProfiler:
         
         await self._update_progress(
             status="In progress",
-            current_step="Parallel Time Optimized Measurements",
-            next_step="Parallel Time Direct Measurements",
-            percent=self._current_progress,
-        )
-
-        await self._dispatch_group("parallel_thmgr_measurements")
-        
-        await self._update_progress(
-            status="In progress",
-            current_step="Parallel Time Direct Measurements",
-            next_step="Data Collection",
+            current_step="Parallel Time Measurements",
+            next_step="Parallel Time Optimized Measurements",
             percent=self._current_progress,
         )
 
         await self._dispatch_group("parallel_direct_measurements")
+        
+        await self._update_progress(
+            status="In progress",
+            current_step="Parallel Time Optimized Measurements",
+            next_step="Data Collection",
+            percent=self._current_progress,
+        )
+
+        await self._dispatch_group("parallel_thmgr_measurements")
         
         await self._update_progress(
             status="In progress",
@@ -524,8 +524,8 @@ class DistributedProfiler:
         # Determine progress allocation for this group
         group_progress_map = {
             "serial_measurements": self.serial_progress,
-            "parallel_thmgr_measurements": self.thmgr_progress,
             "parallel_direct_measurements": self.direct_progress,
+                "parallel_thmgr_measurements": self.thmgr_progress,
         }
         group_progress_total = group_progress_map.get(group_name, 0)
         progress_per_task = group_progress_total / len(tasks) if tasks else 0
@@ -543,7 +543,8 @@ class DistributedProfiler:
                 completed_count += 1
                 async with self._progress_lock:
                     self._current_progress += progress_per_task
-                    # Update progress periodically (every 10% of tasks or every task if <10 tasks)
+
+                    # Update progress periodically (every 10%)
                     update_frequency = max(1, len(tasks) // 10)
                     if completed_count % update_frequency == 0 or completed_count == len(tasks):
                         await self._update_progress(
@@ -563,7 +564,6 @@ class DistributedProfiler:
             raise TaskError(f"Group {group_name} failed: {errors}")
 
     def _get_group_step_name(self, group_name: str) -> str:
-        """Get human-readable step name for a group."""
         step_names = {
             "serial_measurements": "Serial Measurements",
             "parallel_thmgr_measurements": "Parallel Optimized Measurements",
@@ -572,11 +572,10 @@ class DistributedProfiler:
         return step_names.get(group_name, group_name)
 
     def _get_group_next_step(self, group_name: str) -> str:
-        """Get next step name for a group."""
         next_steps = {
-            "serial_measurements": "Parallel Optimized Measurements",
-            "parallel_thmgr_measurements": "Parallel Measurements",
-            "parallel_direct_measurements": "Predictive Model Generation",
+            "serial_measurements": "Parallel Measurements",
+            "parallel_direct_measurements": "Parallel Optimized Measurements",
+            "parallel_thmgr_measurements": "Predictive Model Generation",
         }
         return next_steps.get(group_name, "Next Phase")
     
