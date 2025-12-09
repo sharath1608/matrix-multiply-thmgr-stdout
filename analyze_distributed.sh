@@ -174,7 +174,7 @@ do
 done
 
 # generate compile_commands.json
-repo_path="/data/repo-import/$repo_name"
+repo_path="/home/skoday/talp/data/repo/$repo_name"
 
 json_output=$(jq -n \
   --arg dir "$repo_path" \
@@ -235,7 +235,7 @@ PARALLEL_DIRECT_PROGRESS=20
 CURVE_FIT_PROGRESS=25
 ANALYTICS_GENERATION_PROGRESS=10
 
-repo_path="/app/data/repo-import/$repo_name"
+repo_path="/home/skoday/talp/data/repo/$repo_name"
 delay=0  # No delay needed with per-request socket implementation
 
 cluster_config_path="config/cluster.json"
@@ -305,6 +305,10 @@ echo "direct_progress: $PARALLEL_DIRECT_PROGRESS"
 echo "Measuring time taken for distributed execution..."
 st=$SECONDS
 
+# Create log file for distributed profiler in the repo directory
+distributed_log_file="distributed_profiler.log"
+echo "Distributed profiler logs will be saved to: $distributed_log_file"
+
 python3 distributed_profiler.py \
   --mode measurement \
   --cluster-config "$cluster_config_path" \
@@ -332,8 +336,11 @@ python3 distributed_profiler.py \
   --serial-progress "$SERIAL_PROGRESS" \
   --request-delay "$delay" \
   --thmgr-progress "$PARALLEL_THMGR_PROGRESS" \
-  --direct-progress "$PARALLEL_DIRECT_PROGRESS" || {
+  --direct-progress "$PARALLEL_DIRECT_PROGRESS" \
+  -vv 2>&1 | tee "$distributed_log_file" || {
     echo "Distributed measurement phase failed" >&2
+    echo "Last 50 lines of distributed profiler log:" >&2
+    tail -50 "$distributed_log_file" >&2
     exit 1
   }
 
