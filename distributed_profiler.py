@@ -565,18 +565,18 @@ class DistributedProfiler:
     def _get_group_step_name(self, group_name: str) -> str:
         """Get human-readable step name for a group."""
         step_names = {
-            "serial_measurements": "Serial Measurements (Distributed)",
-            "parallel_thmgr_measurements": "Parallel Time Optimized Measurements",
-            "parallel_direct_measurements": "Parallel Time Direct Measurements",
+            "serial_measurements": "Serial Measurements",
+            "parallel_thmgr_measurements": "Parallel Optimized Measurements",
+            "parallel_direct_measurements": "Parallel Measurements",
         }
         return step_names.get(group_name, group_name)
 
     def _get_group_next_step(self, group_name: str) -> str:
         """Get next step name for a group."""
         next_steps = {
-            "serial_measurements": "Parallel Time Optimized Measurements",
-            "parallel_thmgr_measurements": "Parallel Time Direct Measurements",
-            "parallel_direct_measurements": "Data Collection",
+            "serial_measurements": "Parallel Optimized Measurements",
+            "parallel_thmgr_measurements": "Parallel Measurements",
+            "parallel_direct_measurements": "Predictive Model Generation",
         }
         return next_steps.get(group_name, "Next Phase")
     
