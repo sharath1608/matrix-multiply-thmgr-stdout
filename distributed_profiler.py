@@ -213,7 +213,12 @@ class DistributedProfiler:
 
         self._stage_required_files()
         self.power_profile_map = self._load_power_profile()
+        
         self._persist_state()
+
+        # Progress tracking
+        self._progress_lock = asyncio.Lock()
+        self._current_progress = self.start_progress
 
     def _resolve_job_id(self, job_id: str) -> str:
         if job_id and job_id.lower() != "auto":
@@ -399,44 +404,42 @@ class DistributedProfiler:
             await self._run_curve_fit_tasks()
         else:
             raise ConfigError(f"Unsupported mode: {self.args.mode}")
-
+        
     async def _run_measurement_tasks(self) -> None:
         logging.info("Starting distributed measurements")
-        total_progress = self.start_progress
 
         await self._update_progress(
             status="In progress",
             current_step="Serial Measurements (Distributed)",
             next_step="Parallel Time Optimized Measurements",
-            percent=total_progress,
+            percent=self._current_progress,
         )
 
         await self._dispatch_group("serial_measurements")
-        total_progress += self.serial_progress
+        
         await self._update_progress(
             status="In progress",
             current_step="Parallel Time Optimized Measurements",
             next_step="Parallel Time Direct Measurements",
-            percent=total_progress,
+            percent=self._current_progress,
         )
 
         await self._dispatch_group("parallel_thmgr_measurements")
-        total_progress += self.thmgr_progress
+        
         await self._update_progress(
             status="In progress",
             current_step="Parallel Time Direct Measurements",
             next_step="Data Collection",
-            percent=total_progress,
+            percent=self._current_progress,
         )
 
-
         await self._dispatch_group("parallel_direct_measurements")
-        total_progress += self.direct_progress
+        
         await self._update_progress(
             status="In progress",
             current_step="Data Collection",
             next_step="Curve Fitting",
-            percent=total_progress,
+            percent=self._current_progress,
         )
 
         measurements = self._collect_measurements()
@@ -513,8 +516,39 @@ class DistributedProfiler:
         strategy = task_meta.get("distribution_strategy", "round_robin")
         self._assign_servers(group_name, task_meta, tasks, strategy)
 
+        # Determine progress allocation for this group
+        group_progress_map = {
+            "serial_measurements": self.serial_progress,
+            "parallel_thmgr_measurements": self.thmgr_progress,
+            "parallel_direct_measurements": self.direct_progress,
+        }
+        group_progress_total = group_progress_map.get(group_name, 0)
+        progress_per_task = group_progress_total / len(tasks) if tasks else 0
+
+        # Track completed tasks
+        completed_count = 0
+        completed_lock = asyncio.Lock()
+
+        async def execute_and_track(task: Task, idx: int) -> None:
+            nonlocal completed_count
+            await self._execute_task_with_delay(task, idx)
+            
+            # Update progress after task completes
+            async with completed_lock:
+                completed_count += 1
+                async with self._progress_lock:
+                    self._current_progress += progress_per_task
+                    # Update progress periodically (every 10% of tasks or every task if <10 tasks)
+                    update_frequency = max(1, len(tasks) // 10)
+                    if completed_count % update_frequency == 0 or completed_count == len(tasks):
+                        await self._update_progress(
+                            status="In progress",
+                            current_step=self._get_group_step_name(group_name),
+                            next_step=self._get_group_next_step(group_name),
+                            percent=self._current_progress,
+                        )
         coroutines = [
-            self._execute_task_with_delay(task, idx) for idx, task in enumerate(tasks)
+            execute_and_track(task, idx) for idx, task in enumerate(tasks)
         ]
         results = await asyncio.gather(*coroutines, return_exceptions=True)
 
@@ -523,6 +557,24 @@ class DistributedProfiler:
             errors = ", ".join(str(failure) for failure in failures)
             raise TaskError(f"Group {group_name} failed: {errors}")
 
+    def _get_group_step_name(self, group_name: str) -> str:
+        """Get human-readable step name for a group."""
+        step_names = {
+            "serial_measurements": "Serial Measurements (Distributed)",
+            "parallel_thmgr_measurements": "Parallel Time Optimized Measurements",
+            "parallel_direct_measurements": "Parallel Time Direct Measurements",
+        }
+        return step_names.get(group_name, group_name)
+
+    def _get_group_next_step(self, group_name: str) -> str:
+        """Get next step name for a group."""
+        next_steps = {
+            "serial_measurements": "Parallel Time Optimized Measurements",
+            "parallel_thmgr_measurements": "Parallel Time Direct Measurements",
+            "parallel_direct_measurements": "Data Collection",
+        }
+        return next_steps.get(group_name, "Next Phase")
+    
     def _get_server_by_id(self, server_id: str) -> Server:
         for server in self.servers:
             if server.id == server_id:
