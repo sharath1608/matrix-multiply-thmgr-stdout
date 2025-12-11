@@ -410,11 +410,18 @@ class DistributedProfiler:
 
         await self._update_progress(
             status="In progress",
-            current_step="Distributed Measurements (All Groups)",
-            next_step="Data Collection",
+            current_step="Serial Measurements (Distributed)",
+            next_step="Parallel Time Optimized Measurements",
             percent=self._current_progress,
         )
 
+        await self._update_progress(
+            status="In progress",
+            current_step="Parallel Time Optimized Measurements",
+            next_step="Parallel Time Direct Measurements",
+            percent=self._current_progress,
+        )
+        
         # Run all measurement groups in parallel across different nodes
         await asyncio.gather(
             self._dispatch_group("serial_measurements"),
