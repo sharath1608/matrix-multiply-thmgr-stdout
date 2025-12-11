@@ -213,12 +213,17 @@ class DistributedProfiler:
 
         self._stage_required_files()
         self.power_profile_map = self._load_power_profile()
-        
+
         self._persist_state()
 
         # Progress tracking
         self._progress_lock = asyncio.Lock()
         self._current_progress = self.start_progress
+
+        # Log the resolved analysis file path for debugging
+        logging.info("Analysis file resolved to: %s", self.analysis_file)
+        logging.info("Analysis file parent exists: %s", self.analysis_file.parent.exists())
+        logging.info("Analysis file exists: %s", self.analysis_file.exists())
 
     def _resolve_job_id(self, job_id: str) -> str:
         if job_id and job_id.lower() != "auto":
@@ -415,20 +420,32 @@ class DistributedProfiler:
             percent=self._current_progress,
         )
 
-        await self._update_progress(
-            status="In progress",
-            current_step="Parallel Time Optimized Measurements",
-            next_step="Parallel Time Direct Measurements",
-            percent=self._current_progress,
-        )
-        
-        # Run all measurement groups in parallel across different nodes
         await asyncio.gather(
             self._dispatch_group("serial_measurements"),
             self._dispatch_group("parallel_thmgr_measurements"),
             self._dispatch_group("parallel_direct_measurements")
         )
 
+        # await self._dispatch_group("serial_measurements")
+        
+        await self._update_progress(
+            status="In progress",
+            current_step="Parallel Time Measurements",
+            next_step="Parallel Time Optimized Measurements",
+            percent=self._current_progress,
+        )
+
+        # await self._dispatch_group("parallel_direct_measurements")
+        
+        await self._update_progress(
+            status="In progress",
+            current_step="Parallel Time Optimized Measurements",
+            next_step="Data Collection",
+            percent=self._current_progress,
+        )
+
+        # await self._dispatch_group("parallel_thmgr_measurements")
+        
         await self._update_progress(
             status="In progress",
             current_step="Data Collection",
@@ -513,8 +530,8 @@ class DistributedProfiler:
         # Determine progress allocation for this group
         group_progress_map = {
             "serial_measurements": self.serial_progress,
-            "parallel_thmgr_measurements": self.thmgr_progress,
             "parallel_direct_measurements": self.direct_progress,
+                "parallel_thmgr_measurements": self.thmgr_progress,
         }
         group_progress_total = group_progress_map.get(group_name, 0)
         progress_per_task = group_progress_total / len(tasks) if tasks else 0
@@ -532,7 +549,8 @@ class DistributedProfiler:
                 completed_count += 1
                 async with self._progress_lock:
                     self._current_progress += progress_per_task
-                    # Update progress periodically (every 10% of tasks or every task if <10 tasks)
+
+                    # Update progress periodically (every 10%)
                     update_frequency = max(1, len(tasks) // 10)
                     if completed_count % update_frequency == 0 or completed_count == len(tasks):
                         await self._update_progress(
@@ -552,20 +570,18 @@ class DistributedProfiler:
             raise TaskError(f"Group {group_name} failed: {errors}")
 
     def _get_group_step_name(self, group_name: str) -> str:
-        """Get human-readable step name for a group."""
         step_names = {
-            "serial_measurements": "Serial Measurements (Distributed)",
-            "parallel_thmgr_measurements": "Parallel Time Optimized Measurements",
-            "parallel_direct_measurements": "Parallel Time Direct Measurements",
+            "serial_measurements": "Serial Measurements",
+            "parallel_thmgr_measurements": "Parallel Optimized Measurements",
+            "parallel_direct_measurements": "Parallel Measurements",
         }
         return step_names.get(group_name, group_name)
 
     def _get_group_next_step(self, group_name: str) -> str:
-        """Get next step name for a group."""
         next_steps = {
-            "serial_measurements": "Parallel Time Optimized Measurements",
-            "parallel_thmgr_measurements": "Parallel Time Direct Measurements",
-            "parallel_direct_measurements": "Data Collection",
+            "serial_measurements": "Parallel Measurements",
+            "parallel_direct_measurements": "Parallel Optimized Measurements",
+            "parallel_thmgr_measurements": "Predictive Model Generation",
         }
         return next_steps.get(group_name, "Next Phase")
     
@@ -945,20 +961,27 @@ class DistributedProfiler:
     async def _update_progress(
         self, status: str, current_step: str, next_step: str, percent: float
     ) -> None:
-        record = render_progress_record(
-            job_id=self.job_id,
-            repo=self.repo,
-            repo_name=self.repo_name,
-            start_time=self.start_time,
-            status=status,
-            current_step=current_step,
-            next_step=next_step,
-            percent=percent,
-        )
-        ensure_dir(self.analysis_file.parent)
-        tmp_path = self.analysis_file.with_suffix(".tmp")
-        write_json(tmp_path, record)
-        tmp_path.replace(self.analysis_file)
+        try:
+            logging.info("Updating progress: %s%% - Step: %s -> %s", percent, current_step, next_step)
+            record = render_progress_record(
+                job_id=self.job_id,
+                repo=self.repo,
+                repo_name=self.repo_name,
+                start_time=self.start_time,
+                status=status,
+                current_step=current_step,
+                next_step=next_step,
+                percent=percent,
+            )
+            ensure_dir(self.analysis_file.parent)
+            tmp_path = self.analysis_file.with_suffix(".tmp")
+            logging.debug("Writing progress to temp file: %s", tmp_path)
+            write_json(tmp_path, record)
+            logging.debug("Replacing %s with %s", self.analysis_file, tmp_path)
+            tmp_path.replace(self.analysis_file)
+            logging.info("Progress update complete: written to %s", self.analysis_file)
+        except Exception as exc:
+            logging.error("Failed to update progress: %s", exc, exc_info=True)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
