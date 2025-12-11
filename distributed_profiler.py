@@ -410,8 +410,8 @@ class DistributedProfiler:
 
         await self._update_progress(
             status="In progress",
-            current_step="Serial Measurements (Distributed)",
-            next_step="Parallel Time Optimized Measurements",
+            current_step="Serial Measurements",
+            next_step="Parallel Time Measurements",
             percent=self._current_progress,
         )
 
