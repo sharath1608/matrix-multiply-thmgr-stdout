@@ -513,7 +513,7 @@ class DistributedProfiler:
             )
         logging.info("Local curve fit completed for %s", analysis)
 
-    async def _dispatch_group(self, group_name: str, parallel_mode: bool = False) -> None:
+    async def _dispatch_group(self, group_name: str, parallel_mode: bool = True) -> None:
         tasks = self._build_tasks_for_group(group_name)
         if not tasks:
             logging.info("No tasks for group %s", group_name)
@@ -975,7 +975,7 @@ class DistributedProfiler:
             )
 
     async def _update_progress(
-        self, status: str, current_step: str, next_step: str, percent: float, include_groups: bool = False
+        self, status: str, current_step: str, next_step: str, percent: float, include_groups: bool = True
     ) -> None:
         try:
             parallel_groups = None
