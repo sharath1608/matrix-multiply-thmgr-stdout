@@ -50,8 +50,8 @@ call_fit() {
   progress=`echo "scale=1; p=$progress; bw=$progress_bandwidth; l=$fit_count; p + (bw/l)" | bc -l`
 
   echo "{\"id\":\"$id\",\"repo\":\"$repo\",\"repoName\":\"$repo_name\",\"startTime\":\"$start_time\",\
-  \"endTime\":\"\",\"status\":\"In progress\",\"progress\":{\"currentStep\":\"Predictive Model Generation\",\
-  \"nextStep\":\"None\",\"percent\":$progress},\
+  \"endTime\":\"\",\"status\":\"In progress\",\"progress\":{\"currentStep\":\"Curve Fitting\",\
+  \"nextStep\":\"Complete\",\"percent\":$progress},\
   \"result\":{\"errorCode\":0,\"message\":\"\",\"repo\":\"\"}}" > $analysis_file
 }
 
@@ -489,12 +489,8 @@ done
 
 echo "Measurements collected"
 
-current_progress=$(echo "$current_progress + $SERIAL_PROGRESS + $PARALLEL_THMGR_PROGRESS + $PARALLEL_DIRECT_PROGRESS" | bc -l)
-
-echo "{\"id\":\"$id\",\"repo\":\"$repo\",\"repoName\":\"$repo_name\",\"startTime\":\"$start_time\",\
-\"endTime\":\"\",\"status\":\"In progress\",\"progress\":{\"currentStep\":\"Data Collection\",\
-\"nextStep\":\"Curve Fitting\",\"percent\":$current_progress},\
-\"result\":{\"errorCode\":0,\"message\":\"\",\"repo\":\"\"}}" > $analysis_file
+# Note: Distributed profiler already updated progress to include measurements (65%)
+# and set currentStep to "Curve Fitting", so we don't overwrite it here
 
 jo -p iva=$(jo name=$iva_name values=$(jo -a ${iva[@]})) \
 measurements=$(jo -a ${time_serial[@]}) > time-serial.json
@@ -523,8 +519,11 @@ measurements=$(jo -a ${powerup[@]}) > powerup.json
 jo -p iva=$(jo name=core values=$(jo -a ${core[@]})) \
 measurements=$(jo -a ${energyup[@]}) > energyup.json
 
-progress_bandwidth=10
-fit_count=13
+# Get current progress from analysis file (should be 65% after distributed measurements)
+current_progress=$(jq -r '.progress.percent' "$analysis_file" 2>/dev/null || echo "$progress")
+
+progress_bandwidth=$CURVE_FIT_PROGRESS
+fit_count=12
 
 analysis_types=("time-serial" "time-parallel" "space-serial" "space-parallel" "power-serial" "power-parallel" "energy-serial" "energy-parallel" "speedup" "freeup" "powerup" "energyup")
 
@@ -532,7 +531,7 @@ for i in "${analysis_types[@]}"
 do
   echo "${i}.json"
   echo "${i}-fitted.json"
-  call_fit $i.json $i-fitted.json $progress $progress_bandwidth $fit_count $id $repo $repo_name $start_time $analysis_file
+  call_fit $i.json $i-fitted.json $current_progress $progress_bandwidth $fit_count $id $repo $repo_name $start_time $analysis_file
 done
 
 # time serial
@@ -714,3 +713,5 @@ fitted=$(jo data="`jq '.fitted' energyup-fitted.json`" name='EnergyEfficiency(E1
 fit_method="`jq -r '.method' energyup-fitted.json`" \
 mse="`jq '.mse' energyup-fitted.json`" \
 > $energyup_analytics_file_d
+
+echo "Analytics generation complete! Orion.cpp will finalize status."
