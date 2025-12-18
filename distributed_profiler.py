@@ -136,7 +136,7 @@ def render_progress_record(
     percent: float,
     end_time: Optional[str] = "",
     message: str = "",
-    parallel_groups: Optional[Dict[str, Any]] = None
+    parallel_groups: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     progress_data = {
         "currentStep": current_step,
@@ -144,6 +144,7 @@ def render_progress_record(
         "percent": round(percent, 2),
     }
 
+    # Add parallel group progress if provided
     if parallel_groups:
         progress_data["parallelGroups"] = parallel_groups
 
@@ -219,23 +220,19 @@ class DistributedProfiler:
 
         self._stage_required_files()
         self.power_profile_map = self._load_power_profile()
-
+        
         self._persist_state()
 
         # Progress tracking
         self._progress_lock = asyncio.Lock()
         self._current_progress = self.start_progress
 
+        # Track individual group progress for parallel execution
         self._group_progress = {
             "serial_measurements": {"completed": 0, "total": 0, "percent": 0.0},
             "parallel_thmgr_measurements": {"completed": 0, "total": 0, "percent": 0.0},
             "parallel_direct_measurements": {"completed": 0, "total": 0, "percent": 0.0},
         }
-
-        # Log the resolved analysis file path for debugging
-        logging.info("Analysis file resolved to: %s", self.analysis_file)
-        logging.info("Analysis file parent exists: %s", self.analysis_file.parent.exists())
-        logging.info("Analysis file exists: %s", self.analysis_file.exists())
 
     def _resolve_job_id(self, job_id: str) -> str:
         if job_id and job_id.lower() != "auto":
@@ -427,15 +424,18 @@ class DistributedProfiler:
 
         await self._update_progress(
             status="In progress",
-            current_step="Distributed Measurements (All Groups)",
-            next_step="Data Collection",
+            current_step="Distributed Measurements",
+            next_step="Curve Fitting",
             percent=self._current_progress,
+            include_parallel_groups=True,
         )
 
+        # Run all measurement groups in parallel across different nodes
+        # Pass parallel=True to change progress tracking behavior
         await asyncio.gather(
-            self._dispatch_group("serial_measurements"),
-            self._dispatch_group("parallel_thmgr_measurements"),
-            self._dispatch_group("parallel_direct_measurements")
+            self._dispatch_group("serial_measurements", parallel_mode=True),
+            self._dispatch_group("parallel_thmgr_measurements", parallel_mode=True),
+            self._dispatch_group("parallel_direct_measurements", parallel_mode=True)
         )
 
         # Update progress after all groups complete
@@ -446,8 +446,8 @@ class DistributedProfiler:
 
         await self._update_progress(
             status="In progress",
-            current_step="Data Collection",
-            next_step="Predictive Model Generation",
+            current_step="Curve Fitting",
+            next_step="Complete",
             percent=self._current_progress,
         )
 
@@ -518,12 +518,9 @@ class DistributedProfiler:
         if not tasks:
             logging.info("No tasks for group %s", group_name)
             return
-        
-        if group_name in self._group_progress:
-            self._group_progress[group_name]["total"] = len(tasks)
-            self._group_progress[group_name]["completed"] = 0
-            self._group_progress[group_name]["percent"] = 0.0
 
+        # strategy = self.task_config["task_groups"][group_name]["distribution_strategy"]
+        # self._assign_servers(tasks, strategy)
         task_meta = self.task_config["task_groups"][group_name]
         strategy = task_meta.get("distribution_strategy", "round_robin")
         self._assign_servers(group_name, task_meta, tasks, strategy)
@@ -531,11 +528,17 @@ class DistributedProfiler:
         # Determine progress allocation for this group
         group_progress_map = {
             "serial_measurements": self.serial_progress,
+            "parallel_thmgr_measurements": self.thmgr_progress,
             "parallel_direct_measurements": self.direct_progress,
-                "parallel_thmgr_measurements": self.thmgr_progress,
         }
         group_progress_total = group_progress_map.get(group_name, 0)
         progress_per_task = group_progress_total / len(tasks) if tasks else 0
+
+        # Initialize group progress tracking
+        if group_name in self._group_progress:
+            self._group_progress[group_name]["total"] = len(tasks)
+            self._group_progress[group_name]["completed"] = 0
+            self._group_progress[group_name]["percent"] = 0.0
 
         # Track completed tasks
         completed_count = 0
@@ -544,29 +547,35 @@ class DistributedProfiler:
         async def execute_and_track(task: Task, idx: int) -> None:
             nonlocal completed_count
             await self._execute_task_with_delay(task, idx)
-            
+
             # Update progress after task completes
             async with completed_lock:
                 completed_count += 1
+
+                # Update individual group progress
                 if group_name in self._group_progress:
                     self._group_progress[group_name]["completed"] = completed_count
-                    self._group_progress[group_name]["percent"] = round((completed_count / len(tasks)) * 100,2)
-                
+                    self._group_progress[group_name]["percent"] = round(
+                        (completed_count / len(tasks)) * 100, 2
+                    )
+
+                # In parallel mode, update with group details but don't increment global progress
                 if parallel_mode:
-                    update_freq = max(1, len(tasks) // 10)
-                    if completed_count % update_freq == 0 or completed_count == len(tasks):
+                    # Periodically send progress updates with parallel group details
+                    update_frequency = max(1, len(tasks) // 10)
+                    if completed_count % update_frequency == 0 or completed_count == len(tasks):
                         await self._update_progress(
                             status="In progress",
                             current_step="Distributed Measurements",
-                            next_step="Data Collection",
+                            next_step="Curve Fitting",
                             percent=self._current_progress,
-                            include_groups=True
+                            include_parallel_groups=True,
                         )
                 else:
+                    # Sequential mode: update global progress per task
                     async with self._progress_lock:
                         self._current_progress += progress_per_task
-
-                        # Update progress periodically (every 10%)
+                        # Update progress periodically (every 10% of tasks or every task if <10 tasks)
                         update_frequency = max(1, len(tasks) // 10)
                         if completed_count % update_frequency == 0 or completed_count == len(tasks):
                             await self._update_progress(
@@ -586,18 +595,20 @@ class DistributedProfiler:
             raise TaskError(f"Group {group_name} failed: {errors}")
 
     def _get_group_step_name(self, group_name: str) -> str:
+        """Get human-readable step name for a group."""
         step_names = {
-            "serial_measurements": "Serial Measurements",
-            "parallel_thmgr_measurements": "Parallel Optimized Measurements",
-            "parallel_direct_measurements": "Parallel Measurements",
+            "serial_measurements": "Serial Measurements (Distributed)",
+            "parallel_thmgr_measurements": "Parallel Time Optimized Measurements",
+            "parallel_direct_measurements": "Parallel Time Direct Measurements",
         }
         return step_names.get(group_name, group_name)
 
     def _get_group_next_step(self, group_name: str) -> str:
+        """Get next step name for a group."""
         next_steps = {
-            "serial_measurements": "Parallel Measurements",
-            "parallel_direct_measurements": "Parallel Optimized Measurements",
-            "parallel_thmgr_measurements": "Predictive Model Generation",
+            "serial_measurements": "Parallel Time Optimized Measurements",
+            "parallel_thmgr_measurements": "Parallel Time Direct Measurements",
+            "parallel_direct_measurements": "Data Collection",
         }
         return next_steps.get(group_name, "Next Phase")
     
@@ -975,38 +986,33 @@ class DistributedProfiler:
             )
 
     async def _update_progress(
-        self, status: str, current_step: str, next_step: str, percent: float, include_groups: bool = True
+        self, status: str, current_step: str, next_step: str, percent: float,
+        include_parallel_groups: bool = True
     ) -> None:
-        try:
-            parallel_groups = None
-            logging.info("Updating progress: %s%% - Step: %s -> %s", percent, current_step, next_step)
+        parallel_groups = None
+        if include_parallel_groups:
+            # Include detailed parallel group progress
+            parallel_groups = {
+                "serialMeasurements": self._group_progress["serial_measurements"],
+                "parallelThmgrMeasurements": self._group_progress["parallel_thmgr_measurements"],
+                "parallelDirectMeasurements": self._group_progress["parallel_direct_measurements"],
+            }
 
-            if include_groups:
-                parallel_groups = {
-                    "serialMeasurements": self._group_progress["serial_measurements"],
-                    "parallelThmgrMeasurements": self._group_progress["parallel_thmgr_measurements"],
-                    "parallelDirectMeasurements": self._group_progress["parallel_direct_measurements"],
-                }
-            record = render_progress_record(
-                job_id=self.job_id,
-                repo=self.repo,
-                repo_name=self.repo_name,
-                start_time=self.start_time,
-                status=status,
-                current_step=current_step,
-                next_step=next_step,
-                percent=percent,
-                parallel_groups=parallel_groups,
-            )
-            ensure_dir(self.analysis_file.parent)
-            tmp_path = self.analysis_file.with_suffix(".tmp")
-            logging.debug("Writing progress to temp file: %s", tmp_path)
-            write_json(tmp_path, record)
-            logging.debug("Replacing %s with %s", self.analysis_file, tmp_path)
-            tmp_path.replace(self.analysis_file)
-            logging.info("Progress update complete: written to %s", self.analysis_file)
-        except Exception as exc:
-            logging.error("Failed to update progress: %s", exc, exc_info=True)
+        record = render_progress_record(
+            job_id=self.job_id,
+            repo=self.repo,
+            repo_name=self.repo_name,
+            start_time=self.start_time,
+            status=status,
+            current_step=current_step,
+            next_step=next_step,
+            percent=percent,
+            parallel_groups=parallel_groups,
+        )
+        ensure_dir(self.analysis_file.parent)
+        tmp_path = self.analysis_file.with_suffix(".tmp")
+        write_json(tmp_path, record)
+        tmp_path.replace(self.analysis_file)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
