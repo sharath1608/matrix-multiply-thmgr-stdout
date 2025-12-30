@@ -1,4 +1,4 @@
-{
+  {
   "servers": [
     {
       "id": "server-1",
@@ -6,7 +6,7 @@
       "port": 22,
       "user": "skoday",
       "max_concurrent_tasks": 8,
-      "ssh_key": "/home/skoday/.ssh/id_ed25519",
+      "ssh_key": "/root/.ssh/id_ed25519",
       "work_dir": "/tmp/profiler"
     },
     {
@@ -15,7 +15,7 @@
       "port": 22,
       "user": "skoday",
       "max_concurrent_tasks": 8,
-      "ssh_key": "/home/skoday/.ssh/id_ed25519",
+      "ssh_key": "/root/.ssh/id_ed25519",
       "work_dir": "/tmp/profiler"
     },
     {
@@ -24,7 +24,7 @@
       "port": 22,
       "user": "skoday",
       "max_concurrent_tasks": 8,
-      "ssh_key": "/home/skoday/.ssh/id_ed25519",
+      "ssh_key": "/root/.ssh/id_ed25519",
       "work_dir": "/tmp/profiler"
     }
   ],
