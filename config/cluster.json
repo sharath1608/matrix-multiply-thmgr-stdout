@@ -2,7 +2,7 @@
   "servers": [
     {
       "id": "server-1",
-      "host": "192.168.1.38",
+      "host": "192.168.1.39",
       "port": 22,
       "user": "skoday",
       "max_concurrent_tasks": 2,
@@ -11,7 +11,7 @@
     },
     {
       "id": "server-2",
-      "host": "192.168.1.39",
+      "host": "192.168.1.40",
       "port": 22,
       "user": "skoday",
       "max_concurrent_tasks": 8,
